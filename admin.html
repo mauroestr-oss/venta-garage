@@ -290,11 +290,20 @@ $("p-fotos").onchange = e => {
 async function subirFotos() {
   const urls = [];
   for (const f of fotosNuevas) {
-    const blob = await reducir(f);
-    const nombre = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    /* Si el navegador no puede leer la foto (ej. HEIC), se sube el archivo original */
+    let blob, tipo, ext;
+    try {
+      blob = await reducir(f);
+      tipo = "image/jpeg"; ext = "jpg";
+    } catch (e) {
+      blob = f;
+      tipo = f.type || "image/jpeg";
+      ext = (f.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    }
+    const nombre = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const r = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${nombre}`, {
       method: "POST",
-      headers: { apikey: SB_KEY, Authorization: "Bearer " + sesion.access_token, "Content-Type": "image/jpeg" },
+      headers: { apikey: SB_KEY, Authorization: "Bearer " + sesion.access_token, "Content-Type": tipo },
       body: blob
     });
     if (!r.ok) throw new Error("No se pudo subir una foto: " + (await r.text()));
