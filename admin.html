@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Admin · Venta de Garage</title>
+<style>
+  :root { --bg:#faf8f5; --card:#fff; --ink:#222; --muted:#888; --accent:#1f7a4d; --line:#e6e2dc; --danger:#b23a3a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); padding:16px; }
+  h1 { font-size:1.3rem; margin:0 0 12px; }
+  h2 { font-size:1.05rem; margin:18px 0 8px; }
+  .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  input, textarea, select { width:100%; padding:10px; border:1px solid var(--line); border-radius:10px; font-size:1rem; font-family:inherit; background:#fff; }
+  textarea { min-height:90px; resize:vertical; }
+  .btn { padding:10px 14px; border-radius:10px; border:0; font-size:.95rem; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  .btn.danger { background:var(--danger); }
+  .btn.full { width:100%; margin-top:10px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .item { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
+  .item img { width:56px; height:56px; object-fit:cover; border-radius:8px; background:#eee; }
+  .item .meta { flex:1; min-width:0; }
+  .item .nom { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .sub { font-size:.82rem; color:var(--muted); }
+  .alerta { background:#fff4e0; border:1px solid #f0c77a; border-radius:10px; padding:8px 10px; font-size:.88rem; margin-bottom:6px; }
+  .msg { font-size:.9rem; color:var(--accent); min-height:1.2em; margin-top:8px; }
+  .msg.err { color:var(--danger); }
+  .hidden { display:none !important; }
+  .thumbs { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .thumbs img { width:64px; height:64px; object-fit:cover; border-radius:8px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="box hidden" style="max-width:420px; margin:40px auto;">
+  <h1>Entrar al panel</h1>
+  <label>Mail</label>
+  <input type="email" id="l-mail" autocomplete="username">
+  <label>Contraseña</label>
+  <input type="password" id="l-pass" autocomplete="current-password">
+  <button class="btn full" id="l-btn">Entrar</button>
+  <div class="msg err" id="l-msg"></div>
+</div>
+
+<!-- PANEL -->
+<div id="panel" class="hidden">
+  <div class="row" style="justify-content:space-between; align-items:center;">
+    <h1>Panel · Venta de Garage</h1>
+    <button class="btn ghost" id="salir">Salir</button>
+  </div>
+
+  <div class="box">
+    <h2 style="margin-top:0">Título del sitio</h2>
+    <label>Título</label>
+    <input id="a-titulo">
+    <label>Subtítulo</label>
+    <input id="a-subtitulo">
+    <button class="btn full" id="a-guardar">Guardar título</button>
+    <div class="msg" id="a-msg"></div>
+  </div>
+
+  <div class="box">
+    <h2 style="margin-top:0">Alertas</h2>
+    <div id="alertas"></div>
+    <div class="msg" id="alertas-vacias">Sin alertas por ahora.</div>
+  </div>
+
+  <div class="box">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <h2 style="margin:0">Productos</h2>
+      <button class="btn" id="nuevo">+ Nuevo</button>
+    </div>
+    <div id="lista" style="margin-top:8px;"></div>
+  </div>
+
+  <!-- FORMULARIO -->
+  <div class="box hidden" id="form-box">
+    <h2 style="margin-top:0" id="form-titulo">Nuevo producto</h2>
+    <input type="hidden" id="p-id">
+    <label>Nombre</label>
+    <input id="p-nombre">
+    <label>Precio ($)</label>
+    <input id="p-precio" type="number" inputmode="numeric" min="0">
+    <label>Descripción</label>
+    <textarea id="p-desc"></textarea>
+    <label>Hashtags (separados por coma, ej: cocina, nuevo, bajó-precio)</label>
+    <input id="p-tags">
+    <label>Fotos (la primera es la portada)</label>
+    <input id="p-fotos" type="file" accept="image/*" multiple>
+    <div class="thumbs" id="p-thumbs"></div>
+    <label style="display:flex; gap:8px; align-items:center; color:var(--ink);">
+      <input type="checkbox" id="p-vendido" style="width:auto;"> Vendido
+    </label>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn" id="p-guardar">Guardar</button>
+      <button class="btn ghost" id="p-cancelar">Cancelar</button>
+      <button class="btn danger hidden" id="p-borrar">Borrar</button>
+    </div>
+    <div class="msg" id="p-msg"></div>
+  </div>
+</div>
+
+<script>
+/* ============ CONFIGURACIÓN ============ */
+const SB_URL = "https://sqbfhfwroyixvuawesba.supabase.co";
+const SB_KEY = "sb_publishable_vb5fPIWMRtCPIUrtOehoMw_L4YR4Epk";
+const BUCKET = "fotos";
+
+const $ = id => document.getElementById(id);
+const fmt = n => "$" + Number(n).toLocaleString("es-AR");
+
+/* Sesión: se guarda en el navegador de cada uno */
+let sesion = null;
+try { sesion = JSON.parse(localStorage.getItem("vg-sesion") || "null"); } catch (e) { sesion = null; }
+function guardarSesion(s) { sesion = s; try { localStorage.setItem("vg-sesion", JSON.stringify(s)); } catch (e) {} }
+function borrarSesion() { sesion = null; try { localStorage.removeItem("vg-sesion"); } catch (e) {} }
+
+/* Llamadas a Supabase con el token del admin */
+async function api(path, opts = {}) {
+  const headers = Object.assign({
+    apikey: SB_KEY,
+    Authorization: "Bearer " + (sesion ? sesion.access_token : SB_KEY),
+    "Content-Type": "application/json"
+  }, opts.headers || {});
+  const r = await fetch(SB_URL + path, Object.assign({}, opts, { headers }));
+  if (r.status === 401) { borrarSesion(); mostrarLogin(); throw new Error("Sesión vencida, volvé a entrar"); }
+  if (!r.ok) throw new Error(await r.text());
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
+}
+
+/* ============ LOGIN ============ */
+function mostrarLogin() { $("login").classList.remove("hidden"); $("panel").classList.add("hidden"); }
+function mostrarPanel() { $("login").classList.add("hidden"); $("panel").classList.remove("hidden"); cargarTodo(); }
+
+$("l-btn").onclick = async () => {
+  $("l-msg").textContent = "Entrando...";
+  try {
+    const r = await fetch(SB_URL + "/auth/v1/token?grant_type=password", {
+      method: "POST",
+      headers: { apikey: SB_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("l-mail").value.trim(), password: $("l-pass").value })
+    });
+    const j = await r.json();
+    if (!r.ok || !j.access_token) throw new Error("Mail o contraseña incorrectos");
+    guardarSesion({ access_token: j.access_token, email: $("l-mail").value.trim() });
+    $("l-pass").value = "";
+    $("l-msg").textContent = "";
+    mostrarPanel();
+  } catch (e) { $("l-msg").textContent = e.message; }
+};
+$("salir").onclick = () => { borrarSesion(); location.reload(); };
+
+/* ============ CARGA ============ */
+let productos = [];
+let eventos = [];
+
+async function cargarTodo() {
+  try {
+    const aj = await api("/rest/v1/ajustes?select=*");
+    const t = aj.find(x => x.clave === "titulo"), s = aj.find(x => x.clave === "subtitulo");
+    $("a-titulo").value = t ? t.valor : "";
+    $("a-subtitulo").value = s ? s.valor : "";
+    productos = await api("/rest/v1/productos?select=*&order=creado.desc");
+    eventos = await api("/rest/v1/eventos?select=producto_id,tipo");
+    pintarLista();
+    pintarAlertas();
+  } catch (e) { alert(e.message); }
+}
+
+function contar(pid, tipo) { return eventos.filter(e => e.producto_id === pid && e.tipo === tipo).length; }
+
+/* Alerta: muchas vistas y ninguna consulta */
+function pintarAlertas() {
+  const box = $("alertas");
+  box.innerHTML = "";
+  let n = 0;
+  productos.forEach(p => {
+    const v = contar(p.id, "vista"), c = contar(p.id, "consulta");
+    if (!p.vendido && v >= 15 && c === 0) {
+      n++;
+      const d = document.createElement("div");
+      d.className = "alerta";
+      d.textContent = `"${p.nombre}": ${v} vistas y 0 consultas. ¿Bajás el precio?`;
+      box.appendChild(d);
+    }
+  });
+  $("alertas-vacias").classList.toggle("hidden", n > 0);
+}
+
+/* Lista: vendidos al final si el orden es por precio; acá mostramos por fecha */
+function pintarLista() {
+  const cont = $("lista");
+  cont.innerHTML = "";
+  productos.forEach(p => {
+    const d = document.createElement("div");
+    d.className = "item";
+    d.innerHTML = `
+      <img src="${(p.fotos && p.fotos[0]) || ""}" alt="">
+      <div class="meta">
+        <div class="nom">${escapar(p.nombre)}${p.vendido ? " · VENDIDO" : ""}</div>
+        <div class="sub">${fmt(p.precio)} · ${(p.tags || []).map(t => "#" + t).join(" ")}</div>
+        <div class="sub">👁 ${contar(p.id, "vista")} · 💬 ${contar(p.id, "consulta")}</div>
+      </div>
+      <button class="btn ghost">Editar</button>`;
+    d.querySelector("button").onclick = () => abrirForm(p);
+    cont.appendChild(d);
+  });
+  if (!productos.length) cont.innerHTML = '<div class="msg">Todavía no hay productos.</div>';
+}
+
+function escapar(s) { return String(s || "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+/* ============ TÍTULO ============ */
+$("a-guardar").onclick = async () => {
+  $("a-msg").textContent = "Guardando...";
+  try {
+    await api("/rest/v1/ajustes?clave=eq.titulo", { method: "PATCH", body: JSON.stringify({ valor: $("a-titulo").value }), headers: { Prefer: "return=minimal" } });
+    await api("/rest/v1/ajustes?clave=eq.subtitulo", { method: "PATCH", body: JSON.stringify({ valor: $("a-subtitulo").value }), headers: { Prefer: "return=minimal" } });
+    $("a-msg").textContent = "Guardado.";
+  } catch (e) { $("a-msg").textContent = e.message; $("a-msg").className = "msg err"; }
+};
+
+/* ============ FORMULARIO ============ */
+let fotosActuales = [];
+let fotosNuevas = [];
+
+function abrirForm(p) {
+  $("form-box").classList.remove("hidden");
+  $("p-msg").textContent = "";
+  $("p-fotos").value = "";
+  fotosNuevas = [];
+  if (p) {
+    $("form-titulo").textContent = "Editar producto";
+    $("p-id").value = p.id;
+    $("p-nombre").value = p.nombre;
+    $("p-precio").value = p.precio;
+    $("p-desc").value = p.descripcion || "";
+    $("p-tags").value = (p.tags || []).join(", ");
+    $("p-vendido").checked = !!p.vendido;
+    fotosActuales = [...(p.fotos || [])];
+    $("p-borrar").classList.remove("hidden");
+  } else {
+    $("form-titulo").textContent = "Nuevo producto";
+    $("p-id").value = "";
+    $("p-nombre").value = ""; $("p-precio").value = ""; $("p-desc").value = "";
+    $("p-tags").value = ""; $("p-vendido").checked = false;
+    fotosActuales = [];
+    $("p-borrar").classList.add("hidden");
+  }
+  pintarThumbs();
+  $("form-box").scrollIntoView({ behavior: "smooth" });
+}
+
+function pintarThumbs() {
+  const t = $("p-thumbs");
+  t.innerHTML = "";
+  fotosActuales.forEach(u => { const i = document.createElement("img"); i.src = u; t.appendChild(i); });
+  fotosNuevas.forEach(f => { const i = document.createElement("img"); i.src = URL.createObjectURL(f); t.appendChild(i); });
+}
+
+$("nuevo").onclick = () => abrirForm(null);
+$("p-cancelar").onclick = () => $("form-box").classList.add("hidden");
+
+/* Reduce la foto antes de subirla: más rápido en el celu */
+function reducir(file, max = 1000) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => b ? resolve(b) : reject(new Error("No se pudo procesar la foto")), "image/jpeg", 0.8);
+    };
+    img.onerror = () => reject(new Error("Foto no válida"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+$("p-fotos").onchange = e => {
+  fotosNuevas = [...fotosNuevas, ...Array.from(e.target.files)];
+  pintarThumbs();
+};
+
+async function subirFotos() {
+  const urls = [];
+  for (const f of fotosNuevas) {
+    const blob = await reducir(f);
+    const nombre = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const r = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${nombre}`, {
+      method: "POST",
+      headers: { apikey: SB_KEY, Authorization: "Bearer " + sesion.access_token, "Content-Type": "image/jpeg" },
+      body: blob
+    });
+    if (!r.ok) throw new Error("No se pudo subir una foto: " + (await r.text()));
+    urls.push(`${SB_URL}/storage/v1/object/public/${BUCKET}/${nombre}`);
+  }
+  return urls;
+}
+
+$("p-guardar").onclick = async () => {
+  const id = $("p-id").value;
+  if (!$("p-nombre").value.trim()) { $("p-msg").textContent = "Falta el nombre."; $("p-msg").className = "msg err"; return; }
+  $("p-msg").className = "msg";
+  $("p-msg").textContent = "Guardando...";
+  try {
+    const nuevas = await subirFotos();
+    const datos = {
+      nombre: $("p-nombre").value.trim(),
+      precio: Number($("p-precio").value || 0),
+      descripcion: $("p-desc").value.trim(),
+      tags: $("p-tags").value.split(",").map(t => t.trim().toLowerCase().replace(/^#/, "")).filter(Boolean),
+      vendido: $("p-vendido").checked,
+      fotos: [...fotosActuales, ...nuevas]
+    };
+    if (id) {
+      await api(`/rest/v1/productos?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(datos), headers: { Prefer: "return=minimal" } });
+    } else {
+      await api("/rest/v1/productos", { method: "POST", body: JSON.stringify(datos), headers: { Prefer: "return=minimal" } });
+    }
+    $("form-box").classList.add("hidden");
+    await cargarTodo();
+  } catch (e) { $("p-msg").textContent = e.message; $("p-msg").className = "msg err"; }
+};
+
+$("p-borrar").onclick = async () => {
+  if (!confirm("¿Borrar este producto? No se puede deshacer.")) return;
+  try {
+    await api(`/rest/v1/productos?id=eq.${$("p-id").value}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    $("form-box").classList.add("hidden");
+    await cargarTodo();
+  } catch (e) { $("p-msg").textContent = e.message; $("p-msg").className = "msg err"; }
+};
+
+/* ============ INICIO ============ */
+if (sesion && sesion.access_token) mostrarPanel(); else mostrarLogin();
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Venta de Garage</title>
+<style>
+  :root { --bg:#faf8f5; --card:#fff; --ink:#222; --muted:#888; --accent:#1f7a4d; --line:#e6e2dc; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:90px; }
+  header { padding:16px; text-align:center; }
+  header h1 { margin:0; font-size:1.6rem; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:.95rem; }
+  .bar { position:sticky; top:0; background:var(--bg); padding:10px 16px; border-bottom:1px solid var(--line); z-index:5; }
+  input[type=search], select { width:100%; padding:10px; border:1px solid var(--line); border-radius:10px; font-size:1rem; background:#fff; }
+  .tags { display:flex; gap:8px; overflow-x:auto; padding:10px 0 0; scrollbar-width:none; }
+  .tag { flex:0 0 auto; border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 12px; font-size:.9rem; cursor:pointer; }
+  .tag.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; padding:14px 16px; }
+  @media (min-width:700px){ .grid { grid-template-columns:repeat(4,1fr); } }
+  .card { background:var(--card); border-radius:14px; overflow:hidden; border:1px solid var(--line); cursor:pointer; position:relative; }
+  .card img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:#eee; }
+  .card.sold img { filter:grayscale(1) opacity(.55); }
+  .card .info { padding:8px 10px; }
+  .card .name { font-size:.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card .price { color:var(--accent); font-weight:700; }
+  .badge { position:absolute; top:8px; left:8px; background:#555; color:#fff; font-size:.75rem; padding:3px 8px; border-radius:8px; }
+  .check { position:absolute; top:8px; right:8px; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.9); border:2px solid var(--accent); display:none; align-items:center; justify-content:center; color:var(--accent); font-weight:700; }
+  .card.picked .check { display:flex; }
+  .counter { text-align:center; color:var(--muted); padding:0 16px 10px; font-size:.9rem; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-end; justify-content:center; z-index:20; }
+  .modal.open { display:flex; }
+  .sheet { background:#fff; width:100%; max-width:600px; max-height:92vh; overflow:auto; border-radius:18px 18px 0 0; padding:16px; }
+  .gallery { display:flex; gap:8px; overflow-x:auto; scroll-snap-type:x mandatory; }
+  .gallery img { flex:0 0 85%; scroll-snap-align:start; border-radius:12px; aspect-ratio:1/1; object-fit:cover; }
+  .sheet h2 { margin:12px 0 4px; font-size:1.3rem; }
+  .sheet .price { color:var(--accent); font-size:1.3rem; font-weight:700; }
+  .sheet .desc { color:#444; white-space:pre-line; margin:10px 0; }
+  .btn { display:block; width:100%; text-align:center; padding:12px; border-radius:12px; border:0; font-size:1rem; font-weight:600; cursor:pointer; text-decoration:none; margin-top:8px; }
+  .btn.primary { background:var(--accent); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  .btn.wa { background:#25D366; color:#fff; }
+  .close { float:right; background:none; border:0; font-size:1.6rem; cursor:pointer; color:var(--muted); }
+  .cart { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); padding:12px 16px; display:none; z-index:10; }
+  .cart.show { display:block; }
+  .cart .btn { margin:0; }
+  .empty { text-align:center; color:var(--muted); padding:40px 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="titulo">Venta de Garage</h1>
+  <p id="subtitulo">Mirá las fotos, tocá lo que te interese y consultanos</p>
+</header>
+
+<div class="bar">
+  <input type="search" id="buscar" placeholder="Buscar..." aria-label="Buscar">
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    <select id="orden" aria-label="Ordenar" style="flex:1;">
+      <option value="nuevo">Más nuevos</option>
+      <option value="precio-asc">Precio: menor a mayor</option>
+      <option value="precio-desc">Precio: mayor a menor</option>
+    </select>
+  </div>
+  <div class="tags" id="tags"></div>
+</div>
+
+<div class="counter" id="contador"></div>
+<div class="grid" id="grid"></div>
+<div class="empty" id="vacio" style="display:none;">No hay productos con ese filtro.</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <button class="close" id="cerrar" aria-label="Cerrar">×</button>
+    <div class="gallery" id="galeria"></div>
+    <h2 id="d-nombre"></h2>
+    <div class="price" id="d-precio"></div>
+    <div class="desc" id="d-desc"></div>
+    <button class="btn ghost" id="d-agregar"></button>
+    <a class="btn wa" id="d-consultar" target="_blank" rel="noopener">Consultar por WhatsApp</a>
+  </div>
+</div>
+
+<div class="cart" id="carrito">
+  <button class="btn primary" id="consultar-todo">Consultar lo elegido (0)</button>
+</div>
+
+<script>
+/* ============ CONFIGURACIÓN ============ */
+const CONFIG = {
+  titulo: "Venta de Garage",
+  subtitulo: "Mirá las fotos, tocá lo que te interese y consultanos",
+  whatsapp: "5491169976745",
+  ref: new URLSearchParams(location.search).get("ref") || "directo",
+  supabaseUrl: "https://sqbfhfwroyixvuawesba.supabase.co",
+  supabaseKey: "sb_publishable_vb5fPIWMRtCPIUrtOehoMw_L4YR4Epk"
+};
+
+/* Datos de ejemplo mientras no esté conectada la base */
+const EJEMPLO = [
+  { id:1, nombre:"Cortina blanca", precio:5000, desc:"Cortina de tela, 1,50 m de ancho. Buen estado.", tags:["hogar","nuevo"], vendido:false, fotos:["https://picsum.photos/seed/cortina/600/600"], creado:"2026-10-30" },
+  { id:2, nombre:"Hongos de jardín", precio:2000, desc:"Set de 4 hongos decorativos.", tags:["jardin"], vendido:false, fotos:["https://picsum.photos/seed/hongos/600/600"], creado:"2026-10-29" },
+  { id:3, nombre:"Portarrollo", precio:1500, desc:"Metálico, para baño.", tags:["hogar","bano"], vendido:true, fotos:["https://picsum.photos/seed/portarrollo/600/600"], creado:"2026-10-20" },
+  { id:4, nombre:"Mesa auxiliar", precio:18000, desc:"Madera, 50 x 40 cm. Ideal para living.", tags:["muebles","bajó-precio"], vendido:false, fotos:["https://picsum.photos/seed/mesa/600/600"], creado:"2026-10-28" }
+];
+
+/* ============ ESTADO ============ */
+let productos = [];
+let filtroTag = null;
+let elegidos = new Set();
+
+const $ = id => document.getElementById(id);
+const fmt = n => "$" + Number(n).toLocaleString("es-AR");
+
+const SB_HEADERS = { apikey: CONFIG.supabaseKey, Authorization: `Bearer ${CONFIG.supabaseKey}` };
+
+/* Carga desde Supabase; si falla, usa datos de ejemplo */
+async function cargar() {
+  try {
+    const r = await fetch(`${CONFIG.supabaseUrl}/rest/v1/productos?select=*`, { headers: SB_HEADERS });
+    if (!r.ok) throw new Error(r.status);
+    productos = await r.json();
+  } catch (e) {
+    productos = EJEMPLO;
+  }
+  try {
+    const r = await fetch(`${CONFIG.supabaseUrl}/rest/v1/ajustes?select=*`, { headers: SB_HEADERS });
+    const aj = await r.json();
+    const t = aj.find(x => x.clave === "titulo"), s = aj.find(x => x.clave === "subtitulo");
+    if (t) CONFIG.titulo = t.valor;
+    if (s) CONFIG.subtitulo = s.valor;
+  } catch (e) {}
+  $("titulo").textContent = CONFIG.titulo;
+  $("subtitulo").textContent = CONFIG.subtitulo;
+  pintarTags();
+  pintar();
+}
+
+/* Registra vistas y consultas para las métricas (silencioso, no bloquea nada) */
+function registrar(producto_id, tipo) {
+  if (!producto_id || String(producto_id).startsWith("ejemplo")) return;
+  fetch(`${CONFIG.supabaseUrl}/rest/v1/eventos`, {
+    method: "POST",
+    headers: { ...SB_HEADERS, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({ producto_id, tipo, ref: CONFIG.ref })
+  }).catch(() => {});
+}
+
+/* Botones de hashtag generados desde los productos */
+function pintarTags() {
+  const set = new Set();
+  productos.forEach(p => (p.tags || []).forEach(t => set.add(t)));
+  const cont = $("tags");
+  cont.innerHTML = "";
+  const todos = [null, ...set];
+  todos.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "tag" + (filtroTag === t ? " on" : "");
+    b.textContent = t ? "#" + t : "Todos";
+    b.onclick = () => { filtroTag = t; pintarTags(); pintar(); };
+    cont.appendChild(b);
+  });
+}
+
+/* Filtro + orden. Vendidos: mezclados en "más nuevos"; al final al ordenar por precio */
+function lista() {
+  const q = $("buscar").value.trim().toLowerCase();
+  const orden = $("orden").value;
+  let l = productos.filter(p =>
+    (!filtroTag || (p.tags || []).includes(filtroTag)) &&
+    (!q || p.nombre.toLowerCase().includes(q) || (p.desc || "").toLowerCase().includes(q))
+  );
+  if (orden === "nuevo") {
+    l.sort((a, b) => (b.creado || "").localeCompare(a.creado || ""));
+  } else {
+    l.sort((a, b) => {
+      if (a.vendido !== b.vendido) return a.vendido ? 1 : -1;
+      return orden === "precio-asc" ? a.precio - b.precio : b.precio - a.precio;
+    });
+  }
+  return l;
+}
+
+function pintar() {
+  const l = lista();
+  $("grid").innerHTML = "";
+  $("vacio").style.display = l.length ? "none" : "block";
+  $("contador").textContent = `${productos.filter(p => !p.vendido).length} disponibles · ${productos.filter(p => p.vendido).length} vendidos`;
+  l.forEach(p => {
+    const c = document.createElement("div");
+    c.className = "card" + (p.vendido ? " sold" : "") + (elegidos.has(p.id) ? " picked" : "");
+    c.innerHTML = `
+      <img src="${p.fotos[0] || ""}" alt="${p.nombre}" loading="lazy">
+      ${p.vendido ? '<span class="badge">Vendido</span>' : ""}
+      <span class="check">✓</span>
+      <div class="info">
+        <div class="name">${p.nombre}</div>
+        <div class="price">${fmt(p.precio)}</div>
+      </div>`;
+    c.onclick = () => abrir(p);
+    $("grid").appendChild(c);
+  });
+  actualizarCarrito();
+}
+
+function abrir(p) {
+  registrar(p.id, "vista");
+  $("galeria").innerHTML = p.fotos.map(f => `<img src="${f}" alt="${p.nombre}">`).join("");
+  $("d-nombre").textContent = p.nombre;
+  $("d-precio").textContent = fmt(p.precio) + (p.vendido ? " · VENDIDO" : "");
+  $("d-desc").textContent = p.desc || "";
+  const b = $("d-agregar");
+  b.textContent = elegidos.has(p.id) ? "Quitar de la consulta" : "Agregar a la consulta";
+  b.onclick = () => { toggle(p.id); abrir(p); };
+  const msg = `Hola, me interesa: ${p.nombre} (${fmt(p.precio)}). Ref: ${CONFIG.ref}`;
+  $("d-consultar").href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`;
+  $("d-consultar").onclick = () => registrar(p.id, "consulta");
+  $("modal").classList.add("open");
+}
+
+function toggle(id) {
+  elegidos.has(id) ? elegidos.delete(id) : elegidos.add(id);
+  pintar();
+}
+
+function actualizarCarrito() {
+  const n = elegidos.size;
+  $("carrito").classList.toggle("show", n > 0);
+  $("consultar-todo").textContent = `Consultar lo elegido (${n})`;
+}
+
+/* Mensaje único con todo lo elegido */
+$("consultar-todo").onclick = () => {
+  const items = productos.filter(p => elegidos.has(p.id));
+  const lineas = items.map(p => `• ${p.nombre} (${fmt(p.precio)})`).join("\n");
+  const total = items.reduce((s, p) => s + p.precio, 0);
+  const msg = `Hola, me interesan:\n${lineas}\nTotal: ${fmt(total)}\nRef: ${CONFIG.ref}`;
+  items.forEach(p => registrar(p.id, "consulta"));
+  window.open(`https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`, "_blank");
+};
+
+$("cerrar").onclick = () => $("modal").classList.remove("open");
+$("modal").onclick = e => { if (e.target.id === "modal") $("modal").classList.remove("open"); };
+$("buscar").oninput = pintar;
+$("orden").onchange = pintar;
+
+cargar();
+</script>
+</body>
+</html>
