@@ -7,6 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <title>Admin · Venta de Garage</title>
 <style>
   :root { --bg:#faf8f5; --card:#fff; --ink:#222; --muted:#888; --accent:#1f7a4d; --line:#e6e2dc; --danger:#b23a3a; }
@@ -342,12 +343,17 @@ async function subirFotos() {
     let blob, tipo, ext;
     try {
       blob = await reducir(f.file);
-      tipo = "image/jpeg"; ext = "jpg";
     } catch (e) {
-      blob = f.file;
-      tipo = f.file.type || "image/jpeg";
-      ext = (f.file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      /* Fotos HEIC de iPhone: se convierten a JPG antes de reducirlas */
+      try {
+        if (!window.heic2any) throw e;
+        const conv = await heic2any({ blob: f.file, toType: "image/jpeg", quality: 0.9 });
+        blob = await reducir(Array.isArray(conv) ? conv[0] : conv);
+      } catch (e2) {
+        throw new Error("Esta foto no se pudo procesar. Probá con otra o cambiá el formato de la cámara a Más compatible.");
+      }
     }
+    tipo = "image/jpeg"; ext = "jpg";
     const nombre = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const r = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${nombre}`, {
       method: "POST",
