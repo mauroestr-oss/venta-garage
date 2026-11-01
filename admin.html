@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Admin · Venta de Garage</title>
 <style>
   :root { --bg:#faf8f5; --card:#fff; --ink:#222; --muted:#888; --accent:#1f7a4d; --line:#e6e2dc; --danger:#b23a3a; }
@@ -29,8 +32,13 @@
   .msg { font-size:.9rem; color:var(--accent); min-height:1.2em; margin-top:8px; }
   .msg.err { color:var(--danger); }
   .hidden { display:none !important; }
-  .thumbs { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
-  .thumbs img { width:64px; height:64px; object-fit:cover; border-radius:8px; }
+  .fotos { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+  .foto { position:relative; width:84px; }
+  .foto img { width:84px; height:84px; object-fit:cover; border-radius:10px; border:2px solid transparent; cursor:pointer; display:block; }
+  .foto.portada img { border-color:var(--accent); }
+  .foto .tag { position:absolute; left:4px; bottom:4px; background:var(--accent); color:#fff; font-size:.7rem; padding:2px 6px; border-radius:6px; }
+  .foto .quitar { position:absolute; top:2px; right:2px; background:#fff; border:0; border-radius:50%; width:22px; height:22px; cursor:pointer; font-weight:700; color:var(--danger); }
+  .ayuda { font-size:.8rem; color:var(--muted); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -74,6 +82,8 @@
       <h2 style="margin:0">Productos</h2>
       <button class="btn" id="nuevo">+ Nuevo</button>
     </div>
+    <label>Buscar por nombre, descripción o #hashtag</label>
+    <input id="buscar" type="search" placeholder="Ej: cortina, cocina, nuevo">
     <div id="lista" style="margin-top:8px;"></div>
   </div>
 
@@ -89,15 +99,17 @@
     <textarea id="p-desc"></textarea>
     <label>Hashtags (separados por coma, ej: cocina, nuevo, bajó-precio)</label>
     <input id="p-tags">
-    <label>Fotos (la primera es la portada)</label>
+    <label>Fotos</label>
     <input id="p-fotos" type="file" accept="image/*" multiple>
-    <div class="thumbs" id="p-thumbs"></div>
+    <div class="ayuda">Tocá una foto para elegirla como portada. La primera es la que se ve en la lista. Con la × la quitás.</div>
+    <div class="fotos" id="p-fotos-lista"></div>
     <label style="display:flex; gap:8px; align-items:center; color:var(--ink);">
       <input type="checkbox" id="p-vendido" style="width:auto;"> Vendido
     </label>
     <div class="row" style="margin-top:12px;">
       <button class="btn" id="p-guardar">Guardar</button>
       <button class="btn ghost" id="p-cancelar">Cancelar</button>
+      <button class="btn ghost hidden" id="p-pausar">Pausar</button>
       <button class="btn danger hidden" id="p-borrar">Borrar</button>
     </div>
     <div class="msg" id="p-msg"></div>
@@ -112,6 +124,7 @@ const BUCKET = "fotos";
 
 const $ = id => document.getElementById(id);
 const fmt = n => "$" + Number(n).toLocaleString("es-AR");
+const escapar = s => String(s || "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 
 /* Sesión: se guarda en el navegador de cada uno */
 let sesion = null;
@@ -119,14 +132,14 @@ try { sesion = JSON.parse(localStorage.getItem("vg-sesion") || "null"); } catch 
 function guardarSesion(s) { sesion = s; try { localStorage.setItem("vg-sesion", JSON.stringify(s)); } catch (e) {} }
 function borrarSesion() { sesion = null; try { localStorage.removeItem("vg-sesion"); } catch (e) {} }
 
-/* Llamadas a Supabase con el token del admin */
+/* Llamadas a Supabase: sin caché, así siempre ven lo último */
 async function api(path, opts = {}) {
   const headers = Object.assign({
     apikey: SB_KEY,
     Authorization: "Bearer " + (sesion ? sesion.access_token : SB_KEY),
     "Content-Type": "application/json"
   }, opts.headers || {});
-  const r = await fetch(SB_URL + path, Object.assign({}, opts, { headers }));
+  const r = await fetch(SB_URL + path, Object.assign({ cache: "no-store" }, opts, { headers }));
   if (r.status === 401) { borrarSesion(); mostrarLogin(); throw new Error("Sesión vencida, volvé a entrar"); }
   if (!r.ok) throw new Error(await r.text());
   const t = await r.text();
@@ -181,7 +194,7 @@ function pintarAlertas() {
   let n = 0;
   productos.forEach(p => {
     const v = contar(p.id, "vista"), c = contar(p.id, "consulta");
-    if (!p.vendido && v >= 15 && c === 0) {
+    if (!p.vendido && !p.pausado && v >= 15 && c === 0) {
       n++;
       const d = document.createElement("div");
       d.className = "alerta";
@@ -192,17 +205,28 @@ function pintarAlertas() {
   $("alertas-vacias").classList.toggle("hidden", n > 0);
 }
 
-/* Lista: vendidos al final si el orden es por precio; acá mostramos por fecha */
+/* Búsqueda: nombre, descripción o hashtag */
+function filtrados() {
+  const q = $("buscar").value.trim().toLowerCase().replace(/^#/, "");
+  if (!q) return productos;
+  return productos.filter(p =>
+    (p.nombre || "").toLowerCase().includes(q) ||
+    (p.descripcion || "").toLowerCase().includes(q) ||
+    (p.tags || []).some(t => t.toLowerCase().includes(q))
+  );
+}
+
 function pintarLista() {
   const cont = $("lista");
   cont.innerHTML = "";
-  productos.forEach(p => {
+  const l = filtrados();
+  l.forEach(p => {
     const d = document.createElement("div");
     d.className = "item";
     d.innerHTML = `
       <img src="${(p.fotos && p.fotos[0]) || ""}" alt="">
       <div class="meta">
-        <div class="nom">${escapar(p.nombre)}${p.vendido ? " · VENDIDO" : ""}</div>
+        <div class="nom">${escapar(p.nombre)}${p.vendido ? " · VENDIDO" : ""}${p.pausado ? " · EN PAUSA" : ""}</div>
         <div class="sub">${fmt(p.precio)} · ${(p.tags || []).map(t => "#" + t).join(" ")}</div>
         <div class="sub">👁 ${contar(p.id, "vista")} · 💬 ${contar(p.id, "consulta")}</div>
       </div>
@@ -210,13 +234,13 @@ function pintarLista() {
     d.querySelector("button").onclick = () => abrirForm(p);
     cont.appendChild(d);
   });
-  if (!productos.length) cont.innerHTML = '<div class="msg">Todavía no hay productos.</div>';
+  if (!l.length) cont.innerHTML = '<div class="msg">' + (productos.length ? "Ningún producto coincide con la búsqueda." : "Todavía no hay productos.") + "</div>";
 }
-
-function escapar(s) { return String(s || "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+$("buscar").oninput = pintarLista;
 
 /* ============ TÍTULO ============ */
 $("a-guardar").onclick = async () => {
+  $("a-msg").className = "msg";
   $("a-msg").textContent = "Guardando...";
   try {
     await api("/rest/v1/ajustes?clave=eq.titulo", { method: "PATCH", body: JSON.stringify({ valor: $("a-titulo").value }), headers: { Prefer: "return=minimal" } });
@@ -226,14 +250,14 @@ $("a-guardar").onclick = async () => {
 };
 
 /* ============ FORMULARIO ============ */
-let fotosActuales = [];
-let fotosNuevas = [];
+/* fotosForm: lista ordenada. Cada foto es {url} (ya subida) o {file} (nueva). La primera es la portada. */
+let fotosForm = [];
 
 function abrirForm(p) {
   $("form-box").classList.remove("hidden");
   $("p-msg").textContent = "";
+  $("p-msg").className = "msg";
   $("p-fotos").value = "";
-  fotosNuevas = [];
   if (p) {
     $("form-titulo").textContent = "Editar producto";
     $("p-id").value = p.id;
@@ -242,25 +266,47 @@ function abrirForm(p) {
     $("p-desc").value = p.descripcion || "";
     $("p-tags").value = (p.tags || []).join(", ");
     $("p-vendido").checked = !!p.vendido;
-    fotosActuales = [...(p.fotos || [])];
+    fotosForm = (p.fotos || []).map(u => ({ url: u }));
     $("p-borrar").classList.remove("hidden");
+    $("p-pausar").classList.remove("hidden");
+    $("p-pausar").textContent = p.pausado ? "Reanudar" : "Pausar";
+    $("p-pausar").dataset.pausado = p.pausado ? "1" : "0";
   } else {
     $("form-titulo").textContent = "Nuevo producto";
     $("p-id").value = "";
     $("p-nombre").value = ""; $("p-precio").value = ""; $("p-desc").value = "";
     $("p-tags").value = ""; $("p-vendido").checked = false;
-    fotosActuales = [];
+    fotosForm = [];
     $("p-borrar").classList.add("hidden");
+    $("p-pausar").classList.add("hidden");
   }
-  pintarThumbs();
+  pintarFotos();
   $("form-box").scrollIntoView({ behavior: "smooth" });
 }
 
-function pintarThumbs() {
-  const t = $("p-thumbs");
-  t.innerHTML = "";
-  fotosActuales.forEach(u => { const i = document.createElement("img"); i.src = u; t.appendChild(i); });
-  fotosNuevas.forEach(f => { const i = document.createElement("img"); i.src = URL.createObjectURL(f); t.appendChild(i); });
+function pintarFotos() {
+  const cont = $("p-fotos-lista");
+  cont.innerHTML = "";
+  fotosForm.forEach((f, i) => {
+    const d = document.createElement("div");
+    d.className = "foto" + (i === 0 ? " portada" : "");
+    const src = f.url || URL.createObjectURL(f.file);
+    d.innerHTML = `
+      <img src="${src}" alt="">
+      ${i === 0 ? '<span class="tag">Portada</span>' : ""}
+      <button class="quitar" type="button" aria-label="Quitar">×</button>`;
+    d.querySelector("img").onclick = () => elegirPortada(i);
+    d.querySelector(".quitar").onclick = () => { fotosForm.splice(i, 1); pintarFotos(); };
+    cont.appendChild(d);
+  });
+}
+
+/* Tocar una foto la pasa al primer lugar: es la portada */
+function elegirPortada(i) {
+  if (i === 0) return;
+  const [f] = fotosForm.splice(i, 1);
+  fotosForm.unshift(f);
+  pintarFotos();
 }
 
 $("nuevo").onclick = () => abrirForm(null);
@@ -277,32 +323,35 @@ function reducir(file, max = 1000) {
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
       c.toBlob(b => b ? resolve(b) : reject(new Error("No se pudo procesar la foto")), "image/jpeg", 0.8);
     };
-    img.onerror = () => reject(new Error("Foto no válida"));
+    img.onerror = () => reject(new Error("No se pudo leer la foto"));
     img.src = URL.createObjectURL(file);
   });
 }
 
 $("p-fotos").onchange = e => {
-  fotosNuevas = [...fotosNuevas, ...Array.from(e.target.files)];
-  pintarThumbs();
+  Array.from(e.target.files).forEach(file => fotosForm.push({ file }));
+  pintarFotos();
 };
 
+/* Sube las fotos nuevas y devuelve las URLs en el orden elegido */
 async function subirFotos() {
   const urls = [];
-  for (const f of fotosNuevas) {
+  for (const f of fotosForm) {
+    if (f.url) { urls.push(f.url); continue; }
     /* Si el navegador no puede leer la foto (ej. HEIC), se sube el archivo original */
     let blob, tipo, ext;
     try {
-      blob = await reducir(f);
+      blob = await reducir(f.file);
       tipo = "image/jpeg"; ext = "jpg";
     } catch (e) {
-      blob = f;
-      tipo = f.type || "image/jpeg";
-      ext = (f.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      blob = f.file;
+      tipo = f.file.type || "image/jpeg";
+      ext = (f.file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     }
     const nombre = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const r = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${nombre}`, {
       method: "POST",
+      cache: "no-store",
       headers: { apikey: SB_KEY, Authorization: "Bearer " + sesion.access_token, "Content-Type": tipo },
       body: blob
     });
@@ -318,14 +367,14 @@ $("p-guardar").onclick = async () => {
   $("p-msg").className = "msg";
   $("p-msg").textContent = "Guardando...";
   try {
-    const nuevas = await subirFotos();
+    const fotos = await subirFotos();
     const datos = {
       nombre: $("p-nombre").value.trim(),
       precio: Number($("p-precio").value || 0),
       descripcion: $("p-desc").value.trim(),
       tags: $("p-tags").value.split(",").map(t => t.trim().toLowerCase().replace(/^#/, "")).filter(Boolean),
       vendido: $("p-vendido").checked,
-      fotos: [...fotosActuales, ...nuevas]
+      fotos
     };
     if (id) {
       await api(`/rest/v1/productos?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(datos), headers: { Prefer: "return=minimal" } });
@@ -337,8 +386,22 @@ $("p-guardar").onclick = async () => {
   } catch (e) { $("p-msg").textContent = e.message; $("p-msg").className = "msg err"; }
 };
 
+/* Pausar: oculta la consulta del producto mientras respondés dudas */
+$("p-pausar").onclick = async () => {
+  const pausado = $("p-pausar").dataset.pausado === "1";
+  const pregunta = pausado
+    ? "¿Está seguro que desea reanudar este producto?"
+    : "¿Está seguro que desea pausar este producto? No se podrán hacer consultas hasta reanudarlo.";
+  if (!confirm(pregunta)) return;
+  try {
+    await api(`/rest/v1/productos?id=eq.${$("p-id").value}`, { method: "PATCH", body: JSON.stringify({ pausado: !pausado }), headers: { Prefer: "return=minimal" } });
+    $("form-box").classList.add("hidden");
+    await cargarTodo();
+  } catch (e) { $("p-msg").textContent = e.message; $("p-msg").className = "msg err"; }
+};
+
 $("p-borrar").onclick = async () => {
-  if (!confirm("¿Borrar este producto? No se puede deshacer.")) return;
+  if (!confirm("¿Está seguro que desea borrar este producto? No se puede deshacer.")) return;
   try {
     await api(`/rest/v1/productos?id=eq.${$("p-id").value}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
     $("form-box").classList.add("hidden");
