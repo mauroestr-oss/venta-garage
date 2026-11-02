@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Venta de Garage</title>
 <style>
   :root { --bg:#faf8f5; --card:#fff; --ink:#222; --muted:#888; --accent:#1f7a4d; --line:#e6e2dc; }
@@ -34,7 +36,7 @@
   .modal.open { display:flex; }
   .sheet { background:#fff; width:100%; max-width:600px; max-height:92vh; overflow:auto; border-radius:18px 18px 0 0; padding:16px; }
   .gallery { display:flex; gap:8px; overflow-x:auto; scroll-snap-type:x mandatory; }
-  .gallery img { flex:0 0 85%; scroll-snap-align:start; border-radius:12px; aspect-ratio:1/1; object-fit:cover; }
+  .gallery img { flex:0 0 100%; width:100%; max-height:60vh; object-fit:contain; background:#f1efeb; border-radius:12px; scroll-snap-align:start; touch-action:pan-x pinch-zoom; cursor:zoom-in; }
   .sheet h2 { margin:12px 0 4px; font-size:1.3rem; }
   .sheet .price { color:var(--accent); font-size:1.3rem; font-weight:700; }
   .sheet .desc { color:#444; white-space:pre-line; margin:10px 0; }
@@ -47,6 +49,10 @@
   .cart.show { display:block; }
   .cart .btn { margin:0; }
   .empty { text-align:center; color:var(--muted); padding:40px 16px; }
+  .visor { position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:30; overflow:auto; }
+  .visor.open { display:flex; }
+  .visor img { max-width:100%; max-height:100%; object-fit:contain; touch-action:pinch-zoom; }
+  .visor .x { position:fixed; top:10px; right:14px; color:#fff; font-size:2rem; background:none; border:0; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -81,7 +87,13 @@
     <div class="desc" id="d-desc"></div>
     <button class="btn ghost" id="d-agregar"></button>
     <a class="btn wa" id="d-consultar" target="_blank" rel="noopener">Consultar por WhatsApp</a>
+    <button class="btn ghost" id="d-compartir">Compartir</button>
   </div>
+</div>
+
+<div class="visor" id="visor">
+  <button class="x" id="visor-cerrar" aria-label="Cerrar">×</button>
+  <img id="visor-img" alt="">
 </div>
 
 <div class="cart" id="carrito">
@@ -94,35 +106,45 @@ const CONFIG = {
   titulo: "Venta de Garage",
   subtitulo: "Mirá las fotos, tocá lo que te interese y consultanos",
   whatsapp: "5491169976745",
-  ref: new URLSearchParams(location.search).get("ref") || "directo",
+  ref: "directo",
   supabaseUrl: "https://sqbfhfwroyixvuawesba.supabase.co",
   supabaseKey: "sb_publishable_vb5fPIWMRtCPIUrtOehoMw_L4YR4Epk"
 };
 
-/* Datos de ejemplo mientras no esté conectada la base */
-const EJEMPLO = [
-  { id:1, nombre:"Cortina blanca", precio:5000, desc:"Cortina de tela, 1,50 m de ancho. Buen estado.", tags:["hogar","nuevo"], vendido:false, fotos:["https://picsum.photos/seed/cortina/600/600"], creado:"2026-10-30" },
-  { id:2, nombre:"Hongos de jardín", precio:2000, desc:"Set de 4 hongos decorativos.", tags:["jardin"], vendido:false, fotos:["https://picsum.photos/seed/hongos/600/600"], creado:"2026-10-29" },
-  { id:3, nombre:"Portarrollo", precio:1500, desc:"Metálico, para baño.", tags:["hogar","bano"], vendido:true, fotos:["https://picsum.photos/seed/portarrollo/600/600"], creado:"2026-10-20" },
-  { id:4, nombre:"Mesa auxiliar", precio:18000, desc:"Madera, 50 x 40 cm. Ideal para living.", tags:["muebles","bajó-precio"], vendido:false, fotos:["https://picsum.photos/seed/mesa/600/600"], creado:"2026-10-28" }
-];
-
-/* ============ ESTADO ============ */
-let productos = [];
-let filtroTag = null;
-let elegidos = new Set();
-
-const $ = id => document.getElementById(id);
-const fmt = n => "$" + Number(n).toLocaleString("es-AR");
-
-const SB_HEADERS = { apikey: CONFIG.supabaseKey, Authorization: `Bearer ${CONFIG.supabaseKey}` };
+/* Código de quien compartió: viene en el link y se guarda durante la visita */
+const PARAMS = new URLSearchParams(location.search);
+const PRODUCTO_LINK = PARAMS.get("producto");
+let REF = PARAMS.get("ref");
+try {
+  if (REF) sessionStorage.setItem("vg-ref", REF);
+  else REF = sessionStorage.getItem("vg-ref");
+} catch (e) {}
+CONFIG.ref = REF || "directo";
 
 /* Última visita (por navegador): los productos cargados después se marcan "Nuevo" */
 let ULTIMA_VISITA = null;
 try { const v = localStorage.getItem("vg-ultima-visita"); if (v) ULTIMA_VISITA = new Date(v); } catch (e) {}
 function esNuevo(p) { return ULTIMA_VISITA && p.creado && new Date(p.creado) > ULTIMA_VISITA; }
 
-/* Carga desde Supabase; si falla, usa datos de ejemplo */
+/* Datos de ejemplo mientras no esté conectada la base */
+const EJEMPLO = [
+  { id:"ejemplo1", nombre:"Cortina blanca", precio:5000, desc:"Cortina de tela, 1,50 m de ancho. Buen estado.", tags:["hogar","nuevo"], vendido:false, fotos:["https://picsum.photos/seed/cortina/600/600"], creado:"2026-10-30" },
+  { id:"ejemplo2", nombre:"Hongos de jardín", precio:2000, desc:"Set de 4 hongos decorativos.", tags:["jardin"], vendido:false, fotos:["https://picsum.photos/seed/hongos/600/600"], creado:"2026-10-29" }
+];
+
+/* ============ ESTADO ============ */
+let productos = [];
+let filtroTag = null;
+let elegidos = new Set();
+let actual = null;
+let modalAbierto = false;
+let scrollGuardado = 0;
+
+const $ = id => document.getElementById(id);
+const fmt = n => "$" + Number(n).toLocaleString("es-AR");
+const SB_HEADERS = { apikey: CONFIG.supabaseKey, Authorization: `Bearer ${CONFIG.supabaseKey}` };
+
+/* Carga desde Supabase (sin caché); si falla, usa datos de ejemplo */
 async function cargar() {
   try {
     const r = await fetch(`${CONFIG.supabaseUrl}/rest/v1/productos?select=*`, { headers: SB_HEADERS, cache: "no-store" });
@@ -143,9 +165,15 @@ async function cargar() {
   pintarTags();
   pintar();
   try { localStorage.setItem("vg-ultima-visita", new Date().toISOString()); } catch (e) {}
+
+  /* Si llegó por un link de producto, lo abre directo */
+  if (PRODUCTO_LINK) {
+    const p = productos.find(x => String(x.id) === PRODUCTO_LINK);
+    if (p) abrir(p);
+  }
 }
 
-/* Registra vistas y consultas para las métricas (silencioso, no bloquea nada) */
+/* Registra vistas y consultas para las métricas (silencioso) */
 function registrar(producto_id, tipo) {
   if (!producto_id || String(producto_id).startsWith("ejemplo")) return;
   fetch(`${CONFIG.supabaseUrl}/rest/v1/eventos`, {
@@ -161,8 +189,7 @@ function pintarTags() {
   productos.forEach(p => (p.tags || []).forEach(t => set.add(t)));
   const cont = $("tags");
   cont.innerHTML = "";
-  const todos = [null, ...set];
-  todos.forEach(t => {
+  [null, ...set].forEach(t => {
     const b = document.createElement("button");
     b.className = "tag" + (filtroTag === t ? " on" : "");
     b.textContent = t ? "#" + t : "Todos";
@@ -177,13 +204,13 @@ function lista() {
   const orden = $("orden").value;
   let l = productos.filter(p =>
     (!filtroTag || (p.tags || []).includes(filtroTag)) &&
-    (!q || p.nombre.toLowerCase().includes(q) || (p.desc || "").toLowerCase().includes(q))
+    (!q || p.nombre.toLowerCase().includes(q) || (p.descripcion || p.desc || "").toLowerCase().includes(q))
   );
   if (orden === "nuevo") {
     l.sort((a, b) => (b.creado || "").localeCompare(a.creado || ""));
   } else {
     l.sort((a, b) => {
-      if (a.vendido !== b.vendido) return a.vendido ? 1 : -1;
+      if (!!a.vendido !== !!b.vendido) return a.vendido ? 1 : -1;
       return orden === "precio-asc" ? a.precio - b.precio : b.precio - a.precio;
     });
   }
@@ -199,7 +226,7 @@ function pintar() {
     const c = document.createElement("div");
     c.className = "card" + (p.vendido ? " sold" : "") + (elegidos.has(p.id) ? " picked" : "");
     c.innerHTML = `
-      <img src="${p.fotos[0] || ""}" alt="${p.nombre}" loading="lazy">
+      <img src="${(p.fotos && p.fotos[0]) || ""}" alt="${p.nombre}" loading="lazy">
       ${p.vendido ? '<span class="badge">Vendido</span>' : p.pausado ? '<span class="badge">En pausa</span>' : esNuevo(p) ? '<span class="badge nuevo">Nuevo</span>' : ""}
       <span class="check">✓</span>
       <div class="info">
@@ -212,25 +239,73 @@ function pintar() {
   actualizarCarrito();
 }
 
+/* ============ DETALLE ============ */
+/* Abrir un producto agrega una entrada al historial: el botón atrás cierra el producto, no sale del sitio */
 function abrir(p) {
-  registrar(p.id, "vista");
-  $("galeria").innerHTML = p.fotos.map(f => `<img src="${f}" alt="${p.nombre}">`).join("");
-  $("d-nombre").textContent = p.nombre;
-  $("d-precio").textContent = fmt(p.precio) + (p.vendido ? " · VENDIDO" : "");
-  $("d-desc").textContent = p.desc || "";
-  const b = $("d-agregar");
-  const enPausa = !!p.pausado || !!p.vendido;
-  b.style.display = enPausa ? "none" : "block";
-  b.textContent = elegidos.has(p.id) ? "Quitar de la consulta" : "Agregar a la consulta";
-  b.onclick = () => { toggle(p.id); abrir(p); };
-  $("d-consultar").style.display = enPausa ? "none" : "block";
-  if (p.pausado) $("d-precio").textContent = fmt(p.precio) + " · EN PAUSA";
-  const msg = `Hola, me interesa: ${p.nombre} (${fmt(p.precio)}). Ref: ${CONFIG.ref}`;
-  $("d-consultar").href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`;
-  $("d-consultar").onclick = () => registrar(p.id, "consulta");
+  if (!modalAbierto) {
+    scrollGuardado = window.scrollY;
+    history.pushState({ vg: "detalle" }, "", location.href);
+    modalAbierto = true;
+    registrar(p.id, "vista");
+  }
+  actual = p;
+  renderDetalle(p);
   $("modal").classList.add("open");
 }
 
+function renderDetalle(p) {
+  $("galeria").innerHTML = (p.fotos || []).map(f => `<img src="${f}" alt="${p.nombre}">`).join("");
+  $("galeria").querySelectorAll("img").forEach(img => img.onclick = () => abrirVisor(img.src));
+  $("d-nombre").textContent = p.nombre;
+  $("d-precio").textContent = fmt(p.precio) + (p.vendido ? " · VENDIDO" : p.pausado ? " · EN PAUSA" : "");
+  $("d-desc").textContent = p.descripcion || p.desc || "";
+  const enPausa = !!p.pausado || !!p.vendido;
+  const b = $("d-agregar");
+  b.style.display = enPausa ? "none" : "block";
+  b.textContent = elegidos.has(p.id) ? "Quitar de la consulta" : "Agregar a la consulta";
+  b.onclick = () => { toggle(p.id); renderDetalle(p); };
+  $("d-consultar").style.display = enPausa ? "none" : "block";
+  const msg = `Hola, me interesa: ${p.nombre} (${fmt(p.precio)}). Ref: ${CONFIG.ref}`;
+  $("d-consultar").href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`;
+  $("d-consultar").onclick = () => registrar(p.id, "consulta");
+}
+
+/* Cierra el detalle y vuelve a la lista en la misma posición */
+function cerrarModal() {
+  if (!modalAbierto) return;
+  modalAbierto = false;
+  $("modal").classList.remove("open");
+  window.scrollTo(0, scrollGuardado);
+}
+
+$("cerrar").onclick = () => { if (modalAbierto) history.back(); };
+window.addEventListener("popstate", () => { if (modalAbierto) cerrarModal(); });
+$("modal").onclick = e => { if (e.target.id === "modal" && modalAbierto) history.back(); };
+
+/* Visor de foto: se puede hacer zoom con dos dedos */
+function abrirVisor(src) {
+  $("visor-img").src = src;
+  $("visor").classList.add("open");
+}
+$("visor-cerrar").onclick = () => $("visor").classList.remove("open");
+$("visor").onclick = e => { if (e.target.id === "visor") $("visor").classList.remove("open"); };
+
+/* Compartir: abre el menú del celu con el link del producto y el código de quien lo comparte */
+function linkProducto(p) {
+  return `${location.origin}${location.pathname}?producto=${encodeURIComponent(p.id)}&ref=${encodeURIComponent(CONFIG.ref)}`;
+}
+$("d-compartir").onclick = async () => {
+  if (!actual) return;
+  const url = linkProducto(actual);
+  if (navigator.share) {
+    try { await navigator.share({ title: actual.nombre, text: `${actual.nombre} · ${fmt(actual.precio)}`, url }); } catch (e) {}
+  } else {
+    try { await navigator.clipboard.writeText(url); alert("Link copiado"); }
+    catch (e) { prompt("Copiá el link:", url); }
+  }
+};
+
+/* ============ CARRITO ============ */
 function toggle(id) {
   elegidos.has(id) ? elegidos.delete(id) : elegidos.add(id);
   pintar();
@@ -246,14 +321,12 @@ function actualizarCarrito() {
 $("consultar-todo").onclick = () => {
   const items = productos.filter(p => elegidos.has(p.id));
   const lineas = items.map(p => `• ${p.nombre} (${fmt(p.precio)})`).join("\n");
-  const total = items.reduce((s, p) => s + p.precio, 0);
+  const total = items.reduce((s, p) => s + Number(p.precio), 0);
   const msg = `Hola, me interesan:\n${lineas}\nTotal: ${fmt(total)}\nRef: ${CONFIG.ref}`;
   items.forEach(p => registrar(p.id, "consulta"));
   window.open(`https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`, "_blank");
 };
 
-$("cerrar").onclick = () => $("modal").classList.remove("open");
-$("modal").onclick = e => { if (e.target.id === "modal") $("modal").classList.remove("open"); };
 $("buscar").oninput = pintar;
 $("orden").onchange = pintar;
 

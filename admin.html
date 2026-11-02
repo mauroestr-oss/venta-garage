@@ -88,6 +88,21 @@
     <div id="lista" style="margin-top:8px;"></div>
   </div>
 
+  <div class="box">
+    <h2 style="margin-top:0">Links para compartir</h2>
+    <label>Nombre de quien recibe (ej: Juan)</label>
+    <input id="g-nombre" placeholder="Juan">
+    <label>Producto (opcional)</label>
+    <select id="g-producto"><option value="">Todo el sitio</option></select>
+    <button class="btn full" id="g-generar">Generar link</button>
+    <div class="msg" id="g-resultado"></div>
+    <div class="row hidden" id="g-acciones" style="margin-top:8px;">
+      <button class="btn ghost" id="g-copiar">Copiar</button>
+      <button class="btn" id="g-compartir">Compartir</button>
+    </div>
+    <div class="ayuda">Cada link lleva el nombre de quien lo recibe. Cuando alguien te consulta por ese link, la consulta queda marcada con ese nombre.</div>
+  </div>
+
   <!-- FORMULARIO -->
   <div class="box hidden" id="form-box">
     <h2 style="margin-top:0" id="form-titulo">Nuevo producto</h2>
@@ -183,8 +198,56 @@ async function cargarTodo() {
     eventos = await api("/rest/v1/eventos?select=producto_id,tipo");
     pintarLista();
     pintarAlertas();
+    llenarSelectProductos();
   } catch (e) { alert(e.message); }
 }
+
+function llenarSelectProductos() {
+  const sel = $("g-producto");
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Todo el sitio</option>';
+  productos.forEach(p => {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.nombre;
+    sel.appendChild(o);
+  });
+  sel.value = actual;
+}
+
+/* ============ LINKS PARA COMPARTIR ============ */
+const PUBLIC_URL = "https://mauroestr-oss.github.io/venta-garage/";
+let linkGenerado = "";
+
+function codigoDe(nombre) {
+  return nombre.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+}
+
+$("g-generar").onclick = () => {
+  const codigo = codigoDe($("g-nombre").value);
+  if (!codigo) { $("g-resultado").textContent = "Escribí un nombre para el link."; $("g-resultado").className = "msg err"; return; }
+  const prod = $("g-producto").value;
+  linkGenerado = prod
+    ? `${PUBLIC_URL}?producto=${encodeURIComponent(prod)}&ref=${encodeURIComponent(codigo)}`
+    : `${PUBLIC_URL}?ref=${encodeURIComponent(codigo)}`;
+  $("g-resultado").className = "msg";
+  $("g-resultado").textContent = linkGenerado;
+  $("g-acciones").classList.remove("hidden");
+};
+
+$("g-copiar").onclick = async () => {
+  try { await navigator.clipboard.writeText(linkGenerado); $("g-resultado").textContent = "Link copiado."; }
+  catch (e) { prompt("Copiá el link:", linkGenerado); }
+};
+
+$("g-compartir").onclick = async () => {
+  if (!linkGenerado) return;
+  if (navigator.share) {
+    try { await navigator.share({ title: "Venta de Garage", url: linkGenerado }); } catch (e) {}
+  } else {
+    $("g-copiar").onclick();
+  }
+};
 
 function contar(pid, tipo) { return eventos.filter(e => e.producto_id === pid && e.tipo === tipo).length; }
 
